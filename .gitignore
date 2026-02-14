@@ -1,0 +1,20 @@
+# Virtual environment
+.venv/
+venv/
+
+# Environment files
+.env
+
+#planning docs
+SESSION_HANDOFF.md
+planning.md
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# OS/Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
