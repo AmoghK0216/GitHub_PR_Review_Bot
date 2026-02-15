@@ -5,6 +5,8 @@ from os import getenv
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 
+from github_app_auth import get_pr_changed_files, github_app_is_configured
+
 load_dotenv()
 
 app = FastAPI(title="PR Review Bot")
@@ -58,19 +60,64 @@ async def webhook(request: Request) -> dict:
             "delivery_id": delivery_id,
         }
 
+    installation = payload.get("installation", {}) if isinstance(payload.get("installation"), dict) else {}
     repository = payload.get("repository", {}) if isinstance(payload.get("repository"), dict) else {}
     pull_request = payload.get("pull_request", {}) if isinstance(payload.get("pull_request"), dict) else {}
 
-    repo_name = repository.get("full_name", "unknown")
-    pr_number = payload.get("number") or pull_request.get("number")
+    installation_id = installation.get("id")
+    repo_name = repository.get("full_name")
+    pr_number = pull_request.get("number") or payload.get("number")
+
+    if not installation_id or not repo_name or not pr_number:
+        return {
+            "status": "ignored",
+            "reason": "missing_required_fields",
+            "event": event,
+            "action": action,
+            "delivery_id": delivery_id,
+        }
+
+    github_ready, github_error = github_app_is_configured()
+    if not github_ready:
+        return {
+            "status": "blocked",
+            "reason": "github_app_not_configured",
+            "event": event,
+            "action": action,
+            "delivery_id": delivery_id,
+            "repo": repo_name,
+            "pr_number": pr_number,
+            "details": github_error,
+        }
+
+    try:
+        changed_files = get_pr_changed_files(
+            installation_id=int(installation_id),
+            repo_full_name=str(repo_name),
+            pr_number=int(pr_number),
+        )
+    except Exception as exc:
+        return {
+            "status": "blocked",
+            "reason": "github_api_error",
+            "event": event,
+            "action": action,
+            "delivery_id": delivery_id,
+            "repo": repo_name,
+            "pr_number": pr_number,
+            "details": str(exc),
+        }
 
     return {
         "status": "queued",
         "event": event,
         "action": action,
         "delivery_id": delivery_id,
+        "installation_id": installation_id,
         "repo": repo_name,
         "pr_number": pr_number,
+        "changed_files_count": len(changed_files),
+        "changed_files": changed_files[:15],
     }
 
 

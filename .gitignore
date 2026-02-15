@@ -5,6 +5,10 @@ venv/
 # Environment files
 .env
 
+# Secrets / keys
+private-key.pem
+*.pem
+
 #planning docs
 SESSION_HANDOFF.md
 planning.md
