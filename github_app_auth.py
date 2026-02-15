@@ -56,3 +56,22 @@ def post_pr_comment(installation_id: int, repo_full_name: str, pr_number: int, b
     client = get_installation_client(installation_id)
     pull_request = client.get_repo(repo_full_name).get_pull(pr_number)
     pull_request.create_issue_comment(body)
+
+
+def upsert_pr_comment(
+    installation_id: int,
+    repo_full_name: str,
+    pr_number: int,
+    body: str,
+    marker: str = "<!-- ai-pr-review-bot -->",
+) -> None:
+    client = get_installation_client(installation_id)
+    pull_request = client.get_repo(repo_full_name).get_pull(pr_number)
+    content = f"{marker}\n{body}"
+
+    for comment in pull_request.get_issue_comments():
+        if marker in comment.body:
+            comment.edit(content)
+            return
+
+    pull_request.create_issue_comment(content)
