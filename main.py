@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 
 from github_app_auth import get_pr_changed_files, github_app_is_configured, post_pr_comment
+from groq_reviewer import generate_review_comment
 
 load_dotenv()
 
@@ -109,11 +110,7 @@ async def webhook(request: Request) -> dict:
         }
 
     try:
-        comment_body = (
-            "✅ Webhook verified.\n\n"
-            f"Action: `{action}`\n"
-            f"Changed files detected: **{len(changed_files)}**"
-        )
+        comment_body = generate_review_comment(changed_files)
         post_pr_comment(
             installation_id=int(installation_id),
             repo_full_name=str(repo_name),
