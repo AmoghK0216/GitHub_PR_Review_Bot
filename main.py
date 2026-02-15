@@ -5,7 +5,7 @@ from os import getenv
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 
-from github_app_auth import get_pr_changed_files, github_app_is_configured
+from github_app_auth import get_pr_changed_files, github_app_is_configured, post_pr_comment
 
 load_dotenv()
 
@@ -100,6 +100,30 @@ async def webhook(request: Request) -> dict:
         return {
             "status": "blocked",
             "reason": "github_api_error",
+            "event": event,
+            "action": action,
+            "delivery_id": delivery_id,
+            "repo": repo_name,
+            "pr_number": pr_number,
+            "details": str(exc),
+        }
+
+    try:
+        comment_body = (
+            "✅ Webhook verified.\n\n"
+            f"Action: `{action}`\n"
+            f"Changed files detected: **{len(changed_files)}**"
+        )
+        post_pr_comment(
+            installation_id=int(installation_id),
+            repo_full_name=str(repo_name),
+            pr_number=int(pr_number),
+            body=comment_body,
+        )
+    except Exception as exc:
+        return {
+            "status": "blocked",
+            "reason": "github_comment_error",
             "event": event,
             "action": action,
             "delivery_id": delivery_id,
