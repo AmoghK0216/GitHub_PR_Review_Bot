@@ -35,16 +35,17 @@ def get_installation_client(installation_id: int) -> Github:
     return Github(token)
 
 
-def get_pr_changed_files(installation_id: int, repo_full_name: str, pr_number: int) -> list[dict[str, str]]:
+def get_pr_changed_files(installation_id: int, repo_full_name: str, pr_number: int) -> list[dict[str, str | None]]:
     client = get_installation_client(installation_id)
     pull_request = client.get_repo(repo_full_name).get_pull(pr_number)
-    files: list[dict[str, str]] = []
+    files: list[dict[str, str | None]] = []
 
     for pr_file in pull_request.get_files():
         files.append(
             {
                 "filename": pr_file.filename,
                 "status": pr_file.status,
+                "patch": pr_file.patch,
             }
         )
 
