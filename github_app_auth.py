@@ -49,3 +49,9 @@ def get_pr_changed_files(installation_id: int, repo_full_name: str, pr_number: i
         )
 
     return files
+
+
+def post_pr_comment(installation_id: int, repo_full_name: str, pr_number: int, body: str) -> None:
+    client = get_installation_client(installation_id)
+    pull_request = client.get_repo(repo_full_name).get_pull(pr_number)
+    pull_request.create_issue_comment(body)
