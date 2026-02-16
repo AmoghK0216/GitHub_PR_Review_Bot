@@ -8,12 +8,12 @@ from langchain_openai import ChatOpenAI
 def generate_review_comment(changed_files: list[dict[str, str | None]]) -> str:
     review_input = _build_review_input(changed_files)
     if not review_input.strip():
-        return "## 🤖 AI Code Review\n\nNo reviewable text patches were found in this PR."
+        return "## 🤖 AI Code Review\n\nNo reviewable code context was found in this PR."
 
     prompt = ChatPromptTemplate.from_template(
                 """
         You are a senior code reviewer.
-        Review only the provided PR diffs and return concise markdown.
+        Review ONLY the changed diff lines and return concise markdown.
 
         Use these sections exactly:
         1. Critical Issues
@@ -21,10 +21,21 @@ def generate_review_comment(changed_files: list[dict[str, str | None]]) -> str:
         3. Suggestions
         4. Summary
 
-        Rules:
-        - Focus on changed code only.
+        Scope Rules (strict):
+        - Primary review target is ONLY lines in the "Changed Diff" sections.
+        - "Support Context" is verification-only context. Do NOT review or critique unchanged code in support context.
+        - Mention imports/config/defaults/function arguments only when directly tied to a changed diff line.
+        - Do not invent regressions outside changed diff lines.
+
+        Evidence Rules (strict):
+        - Every issue/risk must include one short evidence quote from the provided input.
+        - If evidence is insufficient, write exactly: "Unverified with provided context." and avoid prescriptive fixes.
+        - If no critical issues are evidenced in changed diff lines, write exactly: "No critical issues found."
+
+        Output Rules:
+        - Keep feedback specific and actionable, but only within changed diff scope.
+        - Do not comment on deployment setup, env strategy, or architecture unless the changed diff lines directly modify them.
         - If no critical issues are found, explicitly say: "No critical issues found."
-        - Keep feedback specific and actionable.
 
         PR Diff Content:
         {review_input}
@@ -78,24 +89,43 @@ def _invoke_provider(
 def _build_review_input(changed_files: list[dict[str, str | None]]) -> str:
     parts: list[str] = []
     max_files = 4
+    max_patch_chars = 3000
+    max_support_chars = 3500
 
     for item in changed_files[:max_files]:
         filename = item.get("filename") or "unknown"
         status = item.get("status") or "unknown"
         patch = item.get("patch") or ""
+        support_context = item.get("support_context") or ""
 
-        if not patch.strip():
+        if not patch.strip() and not support_context.strip():
             continue
 
-        parts.append(
-            "\n".join(
+        file_parts = [
+            f"File: {filename}",
+            f"Status: {status}",
+        ]
+
+        if patch.strip():
+            file_parts.extend(
                 [
-                    f"File: {filename}",
-                    f"Status: {status}",
-                    "Diff:",
-                    patch[:3000],
+                    "Changed Diff (review scope):",
+                    patch[:max_patch_chars],
                 ]
             )
+        else:
+            file_parts.append("Changed Diff (review scope): Not available for this file (possibly binary/large).")
+
+        if support_context.strip():
+            file_parts.extend(
+                [
+                    "Support Context (verification-only, non-diff, line-numbered):",
+                    support_context[:max_support_chars],
+                ]
+            )
+
+        parts.append(
+            "\n".join(file_parts)
         )
 
     return "\n\n---\n\n".join(parts)
