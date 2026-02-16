@@ -6,13 +6,6 @@ from langchain_openai import ChatOpenAI
 
 
 def generate_review_comment(changed_files: list[dict[str, str | None]]) -> str:
-    api_key = getenv("GROQ_API_KEY", "").strip()
-    model = getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
-    base_url = getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1").strip().rstrip("/")
-
-    if not api_key:
-        return _fallback_comment(changed_files, "GROQ_API_KEY not configured")
-
     review_input = _build_review_input(changed_files)
     if not review_input.strip():
         return "## 🤖 AI Code Review\n\nNo reviewable text patches were found in this PR."
@@ -38,6 +31,33 @@ def generate_review_comment(changed_files: list[dict[str, str | None]]) -> str:
         """.strip()
     )
 
+    provider_errors: list[str] = []
+    for provider in ["NAVIGATOR", "GROQ"]:
+        content, err = _invoke_provider(provider, prompt, review_input)
+        if content:
+            return f"## 🤖 AI Code Review\n\n_Model: {provider.lower()}_\n\n{content.strip()}"
+        if err:
+            provider_errors.append(err)
+
+    return _fallback_comment(changed_files, " | ".join(provider_errors) if provider_errors else "No provider configured")
+
+
+def _invoke_provider(
+    provider: str,
+    prompt: ChatPromptTemplate,
+    review_input: str,
+) -> tuple[str | None, str | None]:
+    api_key = getenv(f"{provider}_API_KEY", "").strip()
+    base_url = getenv(f"{provider}_BASE_URL", "").strip().rstrip("/")
+    model = getenv(f"{provider}_MODEL", "").strip()
+
+    if not api_key:
+        return None, f"{provider}: API key not configured"
+    if not base_url:
+        return None, f"{provider}: base URL not configured"
+    if not model:
+        return None, f"{provider}: model not configured"
+
     llm = ChatOpenAI(
         api_key=api_key,
         base_url=base_url,
@@ -50,9 +70,9 @@ def generate_review_comment(changed_files: list[dict[str, str | None]]) -> str:
 
     try:
         content = chain.invoke({"review_input": review_input})
-        return f"## 🤖 AI Code Review\n\n{content.strip()}"
+        return content, None
     except Exception as exc:
-        return _fallback_comment(changed_files, f"Groq request failed: {exc}")
+        return None, f"{provider}: request failed: {exc}"
 
 
 def _build_review_input(changed_files: list[dict[str, str | None]]) -> str:

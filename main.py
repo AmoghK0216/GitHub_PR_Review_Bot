@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 
 from github_app_auth import get_pr_changed_files, github_app_is_configured, upsert_pr_comment
-from groq_reviewer import generate_review_comment
+from llm_reviewer import generate_review_comment
 
 load_dotenv()
 
