@@ -31,6 +31,7 @@ def generate_review_comment(changed_files: list[dict[str, str | None]]) -> str:
         - Every issue/risk must include one short evidence quote from the provided input.
         - If evidence is insufficient, write exactly: "Unverified with provided context." and avoid prescriptive fixes.
         - If no critical issues are evidenced in changed diff lines, write exactly: "No critical issues found."
+        - If any section is marked with "[TRUNCATED]", treat it as incomplete context and do NOT report syntax/compile errors from cut-off text.
 
         Output Rules:
         - Keep feedback specific and actionable, but only within changed diff scope.
@@ -110,7 +111,7 @@ def _build_review_input(changed_files: list[dict[str, str | None]]) -> str:
             file_parts.extend(
                 [
                     "Changed Diff (review scope):",
-                    patch[:max_patch_chars],
+                    _truncate_for_prompt(patch, max_patch_chars),
                 ]
             )
         else:
@@ -120,7 +121,7 @@ def _build_review_input(changed_files: list[dict[str, str | None]]) -> str:
             file_parts.extend(
                 [
                     "Support Context (verification-only, non-diff, line-numbered):",
-                    support_context[:max_support_chars],
+                    _truncate_for_prompt(support_context, max_support_chars),
                 ]
             )
 
@@ -142,3 +143,20 @@ def _fallback_comment(changed_files: list[dict[str, str | None]], reason: str) -
         "### Changed Files\n"
         f"{file_list}"
     )
+
+
+def _truncate_for_prompt(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+
+    marker = "\n[TRUNCATED]"
+    allowed = max_chars - len(marker)
+    if allowed <= 0:
+        return marker.strip()
+
+    chunk = text[:allowed]
+    last_newline = chunk.rfind("\n")
+    if last_newline > 0:
+        chunk = chunk[:last_newline]
+
+    return chunk.rstrip() + marker
