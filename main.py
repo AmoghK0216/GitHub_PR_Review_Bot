@@ -3,7 +3,7 @@ import hmac
 from os import getenv
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 
 from github_app_auth import get_pr_changed_files, github_app_is_configured, upsert_pr_comment
 from llm_reviewer import generate_review_comment
@@ -23,8 +23,49 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _process_pr_review_task(
+    delivery_id: str,
+    installation_id: int,
+    repo_name: str,
+    pr_number: int,
+) -> None:
+    github_ready, github_error = github_app_is_configured()
+    if not github_ready:
+        print(f"[delivery:{delivery_id}] github_app_not_configured: {github_error}")
+        return
+
+    try:
+        changed_files = get_pr_changed_files(
+            installation_id=installation_id,
+            repo_full_name=repo_name,
+            pr_number=pr_number,
+        )
+    except Exception as exc:
+        print(f"[delivery:{delivery_id}] github_api_error: {exc}")
+        return
+
+    support_chars = sum(len(item.get("support_context") or "") for item in changed_files)
+    print(
+        f"[delivery:{delivery_id}] fetched_files={len(changed_files)} support_context_chars={support_chars}"
+    )
+
+    try:
+        comment_body = generate_review_comment(changed_files)
+        upsert_pr_comment(
+            installation_id=installation_id,
+            repo_full_name=repo_name,
+            pr_number=pr_number,
+            body=comment_body,
+        )
+    except Exception as exc:
+        print(f"[delivery:{delivery_id}] github_comment_error: {exc}")
+        return
+
+    print(f"[delivery:{delivery_id}] review_comment_upserted")
+
+
 @app.post("/webhook")
-async def webhook(request: Request) -> dict:
+async def webhook(request: Request, background_tasks: BackgroundTasks) -> dict:
     body = await request.body()
 
     signature = request.headers.get("X-Hub-Signature-256", "")
@@ -78,67 +119,37 @@ async def webhook(request: Request) -> dict:
             "delivery_id": delivery_id,
         }
 
-    github_ready, github_error = github_app_is_configured()
-    if not github_ready:
+    try:
+        installation_id_int = int(installation_id)
+        pr_number_int = int(pr_number)
+    except (TypeError, ValueError):
         return {
-            "status": "blocked",
-            "reason": "github_app_not_configured",
+            "status": "ignored",
+            "reason": "invalid_identifier_types",
             "event": event,
             "action": action,
             "delivery_id": delivery_id,
             "repo": repo_name,
             "pr_number": pr_number,
-            "details": github_error,
         }
 
-    try:
-        changed_files = get_pr_changed_files(
-            installation_id=int(installation_id),
-            repo_full_name=str(repo_name),
-            pr_number=int(pr_number),
-        )
-    except Exception as exc:
-        return {
-            "status": "blocked",
-            "reason": "github_api_error",
-            "event": event,
-            "action": action,
-            "delivery_id": delivery_id,
-            "repo": repo_name,
-            "pr_number": pr_number,
-            "details": str(exc),
-        }
-
-    try:
-        comment_body = generate_review_comment(changed_files)
-        upsert_pr_comment(
-            installation_id=int(installation_id),
-            repo_full_name=str(repo_name),
-            pr_number=int(pr_number),
-            body=comment_body,
-        )
-    except Exception as exc:
-        return {
-            "status": "blocked",
-            "reason": "github_comment_error",
-            "event": event,
-            "action": action,
-            "delivery_id": delivery_id,
-            "repo": repo_name,
-            "pr_number": pr_number,
-            "details": str(exc),
-        }
+    background_tasks.add_task(
+        _process_pr_review_task,
+        delivery_id=delivery_id,
+        installation_id=installation_id_int,
+        repo_name=str(repo_name),
+        pr_number=pr_number_int,
+    )
 
     return {
         "status": "queued",
         "event": event,
         "action": action,
         "delivery_id": delivery_id,
-        "installation_id": installation_id,
+        "installation_id": installation_id_int,
         "repo": repo_name,
-        "pr_number": pr_number,
-        "changed_files_count": len(changed_files),
-        "changed_files": changed_files[:15],
+        "pr_number": pr_number_int,
+        "processing": "background",
     }
 
 
